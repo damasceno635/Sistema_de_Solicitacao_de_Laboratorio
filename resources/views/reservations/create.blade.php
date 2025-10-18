@@ -45,10 +45,10 @@
                     <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4 mb-4">
                         <!-- Data -->
                         <div class="w-full sm:w-1/2">
-                            <x-label for="date" value="{{ __('Data da Reserva') }}" />
-                            <x-input id="date" type="date" name="date" class="mt-1 block w-full" 
-                                     value="{{ old('date') }}" min="{{ now()->format('Y-m-d') }}" required/>
-                            <x-input-error for="date" class="mt-2" />
+                            <x-label for="reservation_date" value="{{ __('Data da Reserva') }}" />
+                            <x-input id="reservation_date" type="date" name="reservation_date" class="mt-1 block w-full" 
+                                     value="{{ old('reservation_date') }}" min="{{ now()->format('Y-m-d') }}" required/>
+                            <x-input-error for="reservation_date" class="mt-2" />
                         </div>
                         
                         <!-- Horário de Início (Slot de 1h) -->
@@ -72,13 +72,19 @@
                     <div class="col-span-6 sm:col-span-4 mb-6">
                         <x-label for="lesson_plan" value="{{ __('Roteiro de Aula (Detalhe tudo que fará/precisará)') }}" />
                         <textarea id="lesson_plan" name="lesson_plan" rows="5"
-                                  class="border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm mt-1 block w-full" required>{{ old('lesson_plan') }}</textarea>
+                                  class="border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm mt-1 block w-full" 
+                                  placeholder="Descreva detalhadamente as atividades que serão realizadas e os materiais necessários no laboratório."
+                                  required>{{ old('lesson_plan') }}</textarea>
                         <x-input-error for="lesson_plan" class="mt-2" />
+                        <p class="text-xs text-gray-500 mt-1">* Mínimo 10 caracteres.</p>
                     </div>
 
                     <!-- Botão de envio -->
-                    <div class="flex items-center justify-end">
-                        <x-button>
+                    <div class="flex items-center justify-end space-x-4">
+                        <a href="{{ route('reservations.index') }}" class="inline-flex items-center px-4 py-2 bg-gray-300 border border-transparent rounded-md font-semibold text-xs text-gray-700 uppercase tracking-widest hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition ease-in-out duration-150">
+                            {{ __('Cancelar') }}
+                        </a>
+                        <x-button class="bg-indigo-600 hover:bg-indigo-700">
                             {{ __('Enviar Solicitação de Reserva') }}
                         </x-button>
                     </div>
@@ -87,4 +93,20 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // Validação client-side para ajudar o usuário
+        document.addEventListener('DOMContentLoaded', function() {
+            const lessonPlan = document.getElementById('lesson_plan');
+            const form = document.querySelector('form');
+            
+            form.addEventListener('submit', function(e) {
+                if (lessonPlan.value.trim().length < 10) {
+                    e.preventDefault();
+                    alert('O roteiro de aula deve ter pelo menos 10 caracteres. Por favor, forneça mais detalhes.');
+                    lessonPlan.focus();
+                }
+            });
+        });
+    </script>
 </x-app-layout>

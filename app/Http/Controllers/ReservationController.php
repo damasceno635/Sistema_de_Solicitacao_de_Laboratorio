@@ -7,9 +7,8 @@ use App\Models\Reservation;
 use App\Models\Laboratory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule; // Importação essencial
-use App\Models\User; // Importação essencial
+use Illuminate\Validation\Rule;
+use App\Models\User;
 
 class ReservationController extends Controller
 {
@@ -20,22 +19,18 @@ class ReservationController extends Controller
     protected function getTimeSlots()
     {
         $slots = [];
-        // Defina o horário de início e fim que o professor pode reservar
-        $start = Carbon::createFromTime(7, 0, 0); // Ex: Começa às 07:00
-        $end = Carbon::createFromTime(22, 0, 0); // Ex: Termina às 22:00
+        $start = Carbon::createFromTime(7, 0, 0);
+        $end = Carbon::createFromTime(22, 0, 0);
 
         while ($start->lessThan($end)) {
             $slotStart = $start->format('H:i');
             $slotEnd = $start->copy()->addHour()->format('H:i');
             
-            // Verifica se o slot de término não ultrapassa o limite
             if ($start->copy()->addHour()->greaterThan($end)) {
                 break;
             }
             
-            // O valor do campo será apenas a hora de INÍCIO (H:i)
             $slots[$slotStart] = "{$slotStart} - {$slotEnd}";
-            
             $start->addHour();
         }
 
@@ -43,44 +38,52 @@ class ReservationController extends Controller
     }
     
     /**
-     * Exibe a lista de reservas.
+     * Exibe a lista de reservas, filtrada por perfil.
      */
     public function index()
     {
         $user = Auth::user();
-
-        // 1. ADMIN (Coordenador de Laboratório - Vê TUDO)
-        if ($user->role === 'admin') {
-            $reservations = Reservation::with('laboratory', 'user')->latest()->get();
-            $view = 'reservations.index'; 
-        } 
-        // 2. COORDENADOR DE CURSO (Vê APENAS as do seu curso)
-        elseif ($user->role === 'coordenador_curso') {
-            $reservations = Reservation::whereHas('user', function ($query) use ($user) {
-                // Filtra usuários que pertencem ao mesmo curso do coordenador
-                $query->where('course', $user->course);
-            })->with('laboratory', 'user')->latest()->get();
-            
-            $view = 'reservations.index-coordinator';
-        }
-        // 3. PROFESSOR e outros (Vê apenas as suas)
-        else {
-            $reservations = Reservation::where('user_id', $user->id)
-                                       ->with('laboratory')
-                                       ->latest()
-                                       ->get();
-            $view = 'reservations.index';
-        }
         
-        return view($view, compact('reservations'));
+        if ($user->role === 'admin') {
+            $reservations = Reservation::with(['laboratory', 'user'])
+                ->whereIn('status', ['em andamento', 'aprovada'])
+                ->orderBy('start_time', 'asc')
+                ->get();
+                
+            return view('reservations.index-coordinator-lab', ['reservations' => $reservations, 'isLabAdmin' => true]);
+            
+        } elseif ($user->role === 'coordenador_curso') {
+            $reservations = Reservation::with(['laboratory', 'user'])
+                ->where('status', 'pendente')
+                ->whereHas('user', function ($query) use ($user) {
+                    $query->where('course', $user->course);
+                })
+                ->orderBy('start_time', 'asc')
+                ->get();
+                
+            return view('reservations.index-coordinator', ['reservations' => $reservations, 'isCourseCoordinator' => true]);
+            
+        } else {
+            // Professor vê apenas suas próprias reservas
+            $reservations = Reservation::with('laboratory')
+                ->where('user_id', $user->id)
+                ->orderBy('start_time', 'asc')
+                ->get();
+                
+            return view('reservations.index', ['reservations' => $reservations]);
+        }
     }
 
     /**
-     * Mostra o formulário para criação de uma nova reserva.
+     * Exibe o formulário de criação de nova reserva.
      */
     public function create()
     {
-        Gate::authorize('create-reservations');
+        $user = Auth::user();
+        // Permissão: Apenas Professor e Admin podem criar
+        if ($user->role !== 'professor' && $user->role !== 'admin') {
+            abort(403, 'Você não tem permissão para criar uma reserva.');
+        }
 
         $laboratories = Laboratory::all();
         $timeSlots = $this->getTimeSlots();
@@ -89,170 +92,197 @@ class ReservationController extends Controller
     }
 
     /**
-     * Armazena uma nova reserva.
+     * Salva a nova reserva no banco de dados.
      */
     public function store(Request $request)
     {
-        Gate::authorize('create-reservations');
-
-        // Validação (usando time_slot para H:i)
-        $request->validate([
-            'laboratory_id' => ['required', 'exists:laboratories,id'],
-            'date' => ['required', 'date', 'after_or_equal:' . Carbon::now()->format('Y-m-d')],
-            'time_slot' => ['required', 'date_format:H:i', Rule::in(array_keys($this->getTimeSlots()))], // Garante que o slot seja válido
-            'lesson_plan' => ['required', 'string', 'min:10'],
-        ]);
-
-        // COMBINAÇÃO DA DATA E HORA (1 hora de duração padrão)
-        $start_time_hour = $request->input('time_slot');
-        $start_time = Carbon::parse($request->input('date') . ' ' . $start_time_hour);
-        $end_time = $start_time->copy()->addHour();
-
-        // CHECAGEM DE CONFLITO (APENAS com reservas já 'aprovada' ou 'em andamento')
-        $conflict = Reservation::where('laboratory_id', $request->laboratory_id)
-            ->where(function ($query) use ($start_time, $end_time) {
-                $query->where(function ($q) use ($start_time, $end_time) {
-                    $q->where('start_time', '<', $end_time)
-                      ->where('end_time', '>', $start_time);
-                });
-            })
-            ->whereIn('status', ['aprovada', 'em andamento']) 
-            ->exists();
-
-        if ($conflict) {
-            return back()->withInput()->withErrors(['time_slot' => 'O laboratório já está reservado (ou em processo de aprovação final) neste horário.']);
+        $user = Auth::user();
+        // Permissão: Apenas Professor e Admin podem criar
+        if ($user->role !== 'professor' && $user->role !== 'admin') {
+            abort(403, 'Você não tem permissão para submeter esta reserva.');
         }
         
-        // CRIAÇÃO DA RESERVA
-        Reservation::create([
-            'user_id' => Auth::id(),
-            'laboratory_id' => $request->laboratory_id,
-            'start_time' => $start_time,
-            'end_time' => $end_time,
-            'lesson_plan' => $request->lesson_plan,
-            'status' => 'pendente', // NOVO FLUXO: Sempre começa como 'pendente' para o coordenador revisar
-            'rejection_feedback' => null,
+        $validated = $request->validate([
+            'laboratory_id' => 'required|exists:laboratories,id',
+            'reservation_date' => 'required|date_format:Y-m-d|after_or_equal:today',
+            'time_slot' => ['required', Rule::in(array_keys($this->getTimeSlots()))],
+            'lesson_plan' => 'required|string|min:10|max:1000',
         ]);
 
-        return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva enviada para revisão do Coordenador de Curso.');
-    }
-    
-    /**
-     * Mostra o formulário de edição da reserva.
-     */
-    public function edit(Reservation $reservation)
-    {
-        // Garante que APENAS o criador ou o admin (Coordenador de Laboratório) pode editar
-        Gate::authorize('modify-reservation', $reservation);
+        $dateTime = Carbon::parse("{$validated['reservation_date']} {$validated['time_slot']}", config('app.timezone'));
+        $endTime = $dateTime->copy()->addHour();
 
-        // NOVA REGRA: Se o usuário é o criador E não é Admin E o status não é 'pendente', barra.
-        $user = Auth::user();
-        if ($user->id === $reservation->user_id && $user->role !== 'admin' && $reservation->status !== 'pendente') {
-            abort(403, 'Você só pode editar reservas que estão com o status "Pendente".');
+        // Checagem de Conflito
+        $existingReservation = Reservation::where('laboratory_id', $validated['laboratory_id'])
+            ->where('start_time', $dateTime)
+            ->whereIn('status', ['pendente', 'em andamento', 'aprovada'])
+            ->first();
+
+        if ($existingReservation) {
+            return back()->withInput()->withErrors([
+                'reservation_date' => 'Já existe uma reserva para o laboratório, data e horário selecionados.',
+            ]);
         }
 
-        $laboratories = Laboratory::all();
-        $timeSlots = $this->getTimeSlots();
+        $reservation = new Reservation([
+            'user_id' => $user->id,
+            'laboratory_id' => $validated['laboratory_id'],
+            'start_time' => $dateTime,
+            'end_time' => $endTime,
+            'lesson_plan' => $validated['lesson_plan'],
+            'status' => 'pendente',
+        ]);
 
-        // Prepara a data e o slot para preencher o formulário
-        $reservation->time_slot_value = $reservation->start_time->format('H:i'); 
+        $reservation->save();
 
-        return view('reservations.edit', compact('reservation', 'laboratories', 'timeSlots'));
+        return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva enviada com sucesso! Aguardando revisão.');
     }
+
+    /**
+     * Exibe a reserva específica.
+     */
+    public function show(Reservation $reservation)
+    {
+        $user = Auth::user();
+
+        $isCreator = $user->id === $reservation->user_id;
+        $isAdmin = $user->role === 'admin';
+        $isCourseCoordinator = $user->role === 'coordenador_curso' && $user->course === $reservation->user->course;
+
+        if (!$isCreator && !$isAdmin && !$isCourseCoordinator) {
+            abort(403, 'Você não tem permissão para visualizar esta reserva.');
+        }
+
+        return view('reservations.show', compact('reservation'));
+    }
+
+    /**
+     * Exibe o formulário de edição da reserva.
+     */
+    public function edit(Reservation $reservation)
+{
+    $user = Auth::user();
+    
+    // APENAS o criador ou o admin podem editar
+    if ($user->id !== $reservation->user_id && $user->role !== 'admin') {
+        abort(403, 'Você não tem permissão para editar esta reserva.');
+    }
+
+    // CORREÇÃO: Permitir edição de reservas rejeitadas também
+    if ($user->id === $reservation->user_id && !in_array($reservation->status, ['pendente', 'em andamento', 'rejeitada'])) {
+        abort(403, 'Você só pode editar reservas com status "Pendente", "Em Andamento" ou "Rejeitada".');
+    }
+
+    $laboratories = Laboratory::all();
+    $timeSlots = $this->getTimeSlots();
+    $currentSlot = $reservation->start_time->format('H:i');
+
+    return view('reservations.edit', compact('reservation', 'laboratories', 'timeSlots', 'currentSlot'));
+}
 
     /**
      * Atualiza a reserva no banco de dados.
      */
     public function update(Request $request, Reservation $reservation)
-    {
-        // Garante que APENAS o criador ou o admin pode atualizar
-        Gate::authorize('modify-reservation', $reservation);
-
-        // NOVA REGRA: Se o usuário é o criador E não é Admin E o status não é 'pendente', barra.
-        $user = Auth::user();
-        if ($user->id === $reservation->user_id && $user->role !== 'admin' && $reservation->status !== 'pendente') {
-            abort(403, 'Você só pode atualizar reservas que estão com o status "Pendente".');
-        }
-
-        // Validação (usando time_slot para H:i)
-        $request->validate([
-            'laboratory_id' => ['required', 'exists:laboratories,id'],
-            'date' => ['required', 'date', 'after_or_equal:' . Carbon::now()->format('Y-m-d')],
-            'time_slot' => ['required', 'date_format:H:i', Rule::in(array_keys($this->getTimeSlots()))], // Garante que o slot seja válido
-            'lesson_plan' => ['required', 'string', 'min:10'],
-        ]);
-
-        // COMBINAÇÃO DA DATA E HORA (1 hora de duração padrão)
-        $start_time_hour = $request->input('time_slot');
-        $start_time = Carbon::parse($request->input('date') . ' ' . $start_time_hour);
-        $end_time = $start_time->copy()->addHour();
-
-        // CHECAGEM DE CONFLITO NO UPDATE
-        // Ignora a própria reserva que está sendo editada
-        $conflict = Reservation::where('laboratory_id', $request->laboratory_id)
-            ->where('id', '!=', $reservation->id)
-            ->where(function ($query) use ($start_time, $end_time) {
-                $query->where(function ($q) use ($start_time, $end_time) {
-                    $q->where('start_time', '<', $end_time)
-                      ->where('end_time', '>', $start_time);
-                });
-            })
-            ->whereIn('status', ['aprovada', 'em andamento']) 
-            ->exists();
-
-        if ($conflict) {
-            return back()->withInput()->withErrors(['time_slot' => 'O laboratório já está reservado (ou em processo de aprovação final) neste horário.']);
-        }
-
-        $reservation->update([
-            'laboratory_id' => $request->laboratory_id,
-            'start_time' => $start_time,
-            'end_time' => $end_time,
-            'lesson_plan' => $request->lesson_plan
-        ]);
-
-        return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva atualizada com sucesso!');
+{
+    $user = Auth::user();
+    
+    // APENAS o criador ou o admin podem atualizar
+    if ($user->id !== $reservation->user_id && $user->role !== 'admin') {
+        abort(403, 'Você não tem permissão para atualizar esta reserva.');
     }
 
+    // CORREÇÃO: Permitir atualização de reservas rejeitadas também
+    if ($user->id === $reservation->user_id && !in_array($reservation->status, ['pendente', 'em andamento', 'rejeitada'])) {
+        abort(403, 'Você não pode atualizar uma reserva que já foi aprovada.');
+    }
+
+    $validated = $request->validate([
+        'laboratory_id' => 'required|exists:laboratories,id',
+        'reservation_date' => 'required|date_format:Y-m-d|after_or_equal:today',
+        'time_slot' => ['required', Rule::in(array_keys($this->getTimeSlots()))],
+        'lesson_plan' => 'required|string|min:10|max:1000',
+    ]);
+
+    $dateTime = Carbon::parse("{$validated['reservation_date']} {$validated['time_slot']}", config('app.timezone'));
+    $endTime = $dateTime->copy()->addHour();
+    
+    // Checagem de Conflito (Excluindo a reserva atual)
+    $existingReservation = Reservation::where('laboratory_id', $validated['laboratory_id'])
+        ->where('start_time', $dateTime)
+        ->where('id', '!=', $reservation->id)
+        ->whereIn('status', ['pendente', 'em andamento', 'aprovada'])
+        ->first();
+
+    if ($existingReservation) {
+        return back()->withInput()->withErrors([
+            'reservation_date' => 'Já existe uma reserva para o laboratório, data e horário selecionados.',
+        ]);
+    }
+
+    // CORREÇÃO: Se o professor edita uma reserva 'rejeitada', ela volta para 'pendente'
+    $newStatus = (in_array($reservation->status, ['em andamento', 'rejeitada']) && $user->id === $reservation->user_id) 
+                 ? 'pendente' 
+                 : $reservation->status;
+    
+    $reservation->update([
+        'laboratory_id' => $validated['laboratory_id'],
+        'start_time' => $dateTime,
+        'end_time' => $endTime,
+        'lesson_plan' => $validated['lesson_plan'],
+        'status' => $newStatus,
+        'rejection_feedback' => null, // Limpa o feedback ao reenviar
+    ]);
+
+    return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva atualizada com sucesso!');
+}
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // FUNÇÕES DE REVISÃO DO COORDENADOR DE CURSO (1º Nível)
+    // -------------------------------------------------------------------------------------------------------------------
 
     /**
      * Exibe o formulário de revisão para o Coordenador de Curso.
      */
     public function review(Reservation $reservation)
     {
-        // Certifique-se de que o usuário tem permissão para gerenciar as reservas do curso
-        Gate::authorize('manage-course-reservations', $reservation);
-
-        // Ações de revisão só devem ocorrer para reservas 'pendente'
-        if ($reservation->status !== 'pendente') {
-             return redirect()->route('reservations.index')->with('error', 'Esta reserva já foi revisada.');
+        $user = Auth::user();
+        
+        // Autorização: Apenas Coordenador de Curso E do curso do professor solicitante
+        if ($user->role !== 'coordenador_curso' || $user->course !== $reservation->user->course) {
+            abort(403, 'Você não tem permissão para revisar esta reserva, pois não é o Coordenador do Curso.');
         }
 
         return view('reservations.review', compact('reservation'));
     }
 
     /**
-     * Processa a decisão do coordenador sobre a reserva (Aprovar/Rejeitar).
+     * Processa a decisão do Coordenador de Curso (Aprovar/Rejeitar).
      */
-    public function process(Request $request, Reservation $reservation)
+    public function courseProcess(Request $request, Reservation $reservation)
     {
-        // Certifique-se de que o usuário tem permissão para gerenciar as reservas do curso
-        Gate::authorize('manage-course-reservations', $reservation);
-
-        // Ações de revisão só devem ocorrer para reservas 'pendente'
+        $user = Auth::user();
+        
+        // Autorização: Apenas Coordenador de Curso E do curso do professor solicitante
+        if ($user->role !== 'coordenador_curso' || $user->course !== $reservation->user->course) {
+            abort(403, 'Você não tem permissão para processar esta reserva.');
+        }
+        
+        // A reserva deve estar PENDENTE para ser processada pelo Coordenador de Curso
         if ($reservation->status !== 'pendente') {
-             return redirect()->route('reservations.index')->with('error', 'Esta reserva já foi revisada.');
+            return redirect()->route('reservations.index')->with('error', 'Esta reserva já foi revisada pelo curso e não está mais pendente.');
         }
         
         $action = $request->input('action');
         
-        // Regra de validação de 'action'
+        // Regras de validação
         $rules = [
-            'action' => ['required', Rule::in(['em_andamento', 'rejeitada'])], 
+            'action' => ['required', Rule::in(['aprovada', 'rejeitada'])],
         ];
 
+        // Se for rejeitada, o feedback é obrigatório
         if ($action === 'rejeitada') {
-            $rules['rejection_feedback'] = ['required', 'string', 'min:10'];
+            $rules['rejection_feedback'] = 'required|string|min:10';
         }
 
         $request->validate($rules);
@@ -260,35 +290,111 @@ class ReservationController extends Controller
         if ($action === 'rejeitada') {
             $reservation->status = 'rejeitada';
             $reservation->rejection_feedback = $request->input('rejection_feedback');
-            $message = 'Reserva rejeitada. O professor foi notificado com o feedback.';
+            $message = 'Reserva rejeitada pelo Coordenador de Curso. O professor foi notificado com o feedback.';
         } else {
             // Se for aprovada pelo Coordenador de Curso, muda para 'em andamento'
             $reservation->status = 'em andamento';
             $reservation->rejection_feedback = null;
-            $message = 'Reserva aprovada pelo curso e agora está "Em Andamento".';
+            $message = 'Reserva aprovada pelo curso e agora está "Em Andamento" (aguardando aprovação final do laboratório).';
         }
 
         $reservation->save();
 
+        // Redireciona de volta para a listagem do Coordenador de Curso
         return redirect()->route('reservations.index')->with('success', $message);
     }
     
+    // -------------------------------------------------------------------------------------------------------------------
+    // FUNÇÕES DE REVISÃO DO COORDENADOR DE LABORATÓRIO (2º Nível - Admin)
+    // -------------------------------------------------------------------------------------------------------------------
+    
+    /**
+     * Exibe o formulário de revisão para o Coordenador de Laboratório (Admin).
+     */
+    public function labReview(Reservation $reservation)
+    {
+        $user = Auth::user();
+        
+        // Autorização: Apenas Admin (Coordenador de Laboratório)
+        if ($user->role !== 'admin') {
+            abort(403, 'Você não tem permissão para acessar a revisão de laboratório.');
+        }
+        
+        // A reserva deve estar 'em andamento' para ser processada pelo Coordenador de Laboratório
+        if ($reservation->status !== 'em andamento') {
+             return redirect()->route('reservations.index')->with('error', 'Esta reserva não está "Em Andamento" e não pode ser revisada nesta etapa.');
+        }
+
+        return view('reservations.lab-review', compact('reservation'));
+    }
+
+    /**
+     * Processa a decisão do Coordenador de Laboratório (Aprovar/Rejeitar FINAL).
+     */
+    public function labProcess(Request $request, Reservation $reservation)
+    {
+        $user = Auth::user();
+        
+        // Autorização: Apenas Admin (Coordenador de Laboratório)
+        if ($user->role !== 'admin') {
+            abort(403, 'Você não tem permissão para processar a reserva nesta etapa.');
+        }
+
+        // A reserva deve estar 'em andamento' para ser processada pelo Coordenador de Laboratório
+        if ($reservation->status !== 'em andamento') {
+            return redirect()->route('reservations.index')->with('error', 'Esta reserva não está "Em Andamento" e não pode ser processada nesta etapa.');
+        }
+        
+        $action = $request->input('action');
+        
+        // Regras de validação
+        $rules = [
+            'action' => ['required', Rule::in(['aprovada', 'rejeitada'])],
+        ];
+
+        // Se for rejeitada, o feedback é obrigatório
+        if ($action === 'rejeitada') {
+            $rules['rejection_feedback'] = 'required|string|min:10';
+        }
+
+        $request->validate($rules);
+        
+        if ($action === 'rejeitada') {
+            $reservation->status = 'rejeitada';
+            $reservation->rejection_feedback = $request->input('rejection_feedback');
+            $message = 'Reserva rejeitada. O professor foi notificado com o feedback do laboratório.';
+        } else {
+            // APROVAÇÃO FINAL
+            $reservation->status = 'aprovada';
+            $reservation->rejection_feedback = null;
+            $message = 'Reserva aprovada e confirmada pelo Coordenador de Laboratório.';
+        }
+
+        $reservation->save();
+
+        // O Admin retorna para a view de Lab Coordinator (index genérica, que ele verá o status)
+        return redirect()->route('reservations.index')->with('success', $message);
+    }
+
     /**
      * Remove a reserva.
      */
     public function destroy(Reservation $reservation)
-    {
-        // Garante que APENAS o criador ou o admin pode cancelar
-        Gate::authorize('modify-reservation', $reservation);
-
-        // NOVA REGRA: Se o usuário é o criador E não é Admin E o status não é 'pendente', barra.
-        $user = Auth::user();
-        if ($user->id === $reservation->user_id && $user->role !== 'admin' && $reservation->status !== 'pendente') {
-            abort(403, 'Você só pode cancelar reservas que estão com o status "Pendente".');
-        }
-
-        $reservation->delete();
-
-        return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva cancelada com sucesso!');
+{
+    $user = Auth::user();
+    
+    // APENAS o criador ou o admin podem cancelar/deletar
+    if ($user->id !== $reservation->user_id && $user->role !== 'admin') {
+        abort(403, 'Você não tem permissão para cancelar esta reserva.');
     }
+
+    // CORREÇÃO: Permitir que professores excluam reservas rejeitadas também
+    if ($user->id === $reservation->user_id && !in_array($reservation->status, ['pendente', 'rejeitada'])) {
+        abort(403, 'Você só pode cancelar reservas próprias com status "Pendente" ou "Rejeitada".');
+    }
+
+    $reservation->delete();
+
+    return redirect()->route('reservations.index')->with('success', 'Solicitação de reserva cancelada com sucesso!');
+}
 }

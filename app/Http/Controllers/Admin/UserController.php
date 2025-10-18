@@ -3,7 +3,6 @@
 // app/Http/Controllers/Admin/UserController.php
 
 namespace App\Http\Controllers\Admin;
-
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\User;
@@ -44,6 +43,24 @@ class UserController extends Controller
 
         // ... (sua lógica de validação condicional)
 
+        $request->validate($rules);
+
+        // REGRAS DE VALIDAÇÃO OBRIGATÓRIAS
+        $rules = [
+            'role' => 'required|in:coordenador_curso,professor',
+            'name' => 'required|string|max:255',
+            'email' => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:8|confirmed',
+            'course' => 'required|string|max:255', // OBRIGATÓRIO PARA TODOS
+        ];
+
+        // CAMPOS OBRIGATÓRIOS APENAS PARA PROFESSORES
+        if ($request->role === 'professor') {
+            $rules['discipline'] = 'required|string|max:255';
+            $rules['period'] = 'required|string|max:255';
+        }
+
+        // VALIDAÇÃO
         $request->validate($rules);
 
         // 4. Criação do Usuário

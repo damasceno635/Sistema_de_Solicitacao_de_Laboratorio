@@ -9,14 +9,14 @@
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
             <div class="bg-white overflow-hidden shadow-xl sm:rounded-lg p-6">
                 
-                @can('manage-users')
+                @if(Auth::user()->role === 'admin') <!-- ← MUDEI AQUI -->
                     <div class="mb-4">
                         <a href="{{ route('admin.laboratories.create') }}" 
                            class="inline-flex items-center px-4 py-2 bg-gray-800 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-gray-700 active:bg-gray-900 focus:outline-none focus:border-gray-900 focus:ring ring-gray-300 disabled:opacity-25 transition ease-in-out duration-150">
                             {{ __('Criar Novo Laboratório') }}
                         </a>
                     </div>
-                @endcan
+                @endif <!-- ← MUDEI AQUI -->
 
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
@@ -27,9 +27,9 @@
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Capacidade</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                 <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Detalhes</th>
-                                @can('manage-users')
+                                @if(Auth::user()->role === 'admin') <!-- ← MUDEI AQUI -->
                                     <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
-                                @endcan
+                                @endif <!-- ← MUDEI AQUI -->
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
@@ -54,7 +54,7 @@
                                         </button>
                                     </td>
                                     
-                                    @can('manage-users')
+                                    @if(Auth::user()->role === 'admin') <!-- ← MUDEI AQUI -->
                                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <a href="{{ route('admin.laboratories.edit', $laboratory) }}" class="text-indigo-600 hover:text-indigo-900 mr-2">Editar</a>
                                             <form action="{{ route('admin.laboratories.destroy', $laboratory) }}" method="POST" class="inline" onsubmit="return confirm('Tem certeza que deseja excluir?');">
@@ -63,7 +63,7 @@
                                                 <button type="submit" class="text-red-600 hover:text-red-900">Excluir</button>
                                             </form>
                                         </td>
-                                    @endcan
+                                    @endif <!-- ← MUDEI AQUI -->
                                 </tr>
                                 
                                 <x-plain-modal name="details-{{ $laboratory->id }}">
@@ -91,7 +91,7 @@
                                 </x-plain-modal>
                             @endforeach
                             @if ($laboratories->isEmpty())
-                                <tr><td colspan="{{ Gate::allows('manage-users') ? '6' : '5' }}" class="px-6 py-4 text-center text-gray-500">Nenhum laboratório cadastrado.</td></tr>
+                                <tr><td colspan="{{ Auth::user()->role === 'admin' ? '6' : '5' }}" class="px-6 py-4 text-center text-gray-500">Nenhum laboratório cadastrado.</td></tr> <!-- ← MUDEI AQUI -->
                             @endif
                         </tbody>
                     </table>

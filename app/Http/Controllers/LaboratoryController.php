@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Laboratory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Auth; // ← ADICIONE ESTA LINHA
 use Illuminate\Validation\Rule;
 
 class LaboratoryController extends Controller
@@ -30,11 +31,10 @@ class LaboratoryController extends Controller
      */
     public function create()
     {
-        // O middleware de rota 'can:manage-users' já protege isso,
-        // mas é bom ter uma checagem aqui também, caso a rota seja chamada de outra forma.
-        /*if (Gate::denies('manage-users')) {
-            abort(403); 
-        }*/
+        // VERIFICAÇÃO DE SEGURANÇA - APENAS ADMIN
+        if (Auth::user()->role !== 'admin') {
+            abort(403, 'Apenas administradores podem criar laboratórios.');
+        }
 
         return view('laboratories.create');
     }
@@ -44,6 +44,11 @@ class LaboratoryController extends Controller
      */
     public function store(Request $request)
     {
+        // VERIFICAÇÃO DE SEGURANÇA - APENAS ADMIN
+        if (Auth::user()->role !== 'admin') {
+            abort(403, 'Apenas administradores podem criar laboratórios.');
+        }
+
         // Validação dos dados de entrada
         $validatedData = $request->validate([
             'name' => ['required', 'string', 'max:255', 'unique:laboratories'],
@@ -59,7 +64,7 @@ class LaboratoryController extends Controller
 
         Laboratory::create($validatedData);
 
-        return redirect()->route('laboratories.index')->with('success', 'Laboratório criado com sucesso!');
+        return redirect()->route('admin.laboratories.index')->with('success', 'Laboratório criado com sucesso!'); // ← MUDEI A ROTA AQUI
     }
 
     // Não precisamos do método show() por enquanto, a listagem já é suficiente.
@@ -76,6 +81,11 @@ class LaboratoryController extends Controller
      */
     public function edit(Laboratory $laboratory)
     {
+        // VERIFICAÇÃO DE SEGURANÇA - APENAS ADMIN
+        if (Auth::user()->role !== 'admin') {
+            abort(403, 'Apenas administradores podem editar laboratórios.');
+        }
+
         return view('laboratories.edit', compact('laboratory'));
     }
 
@@ -84,6 +94,11 @@ class LaboratoryController extends Controller
      */
     public function update(Request $request, Laboratory $laboratory)
     {
+        // VERIFICAÇÃO DE SEGURANÇA - APENAS ADMIN
+        if (Auth::user()->role !== 'admin') {
+            abort(403, 'Apenas administradores podem atualizar laboratórios.');
+        }
+
         // Validação dos dados de entrada
         $validatedData = $request->validate([
             // Regra 'unique' modificada para ignorar o próprio laboratório que está sendo atualizado
@@ -100,7 +115,7 @@ class LaboratoryController extends Controller
 
         $laboratory->update($validatedData);
 
-        return redirect()->route('laboratories.index')->with('success', 'Laboratório atualizado com sucesso!');
+        return redirect()->route('admin.laboratories.index')->with('success', 'Laboratório atualizado com sucesso!'); // ← MUDEI A ROTA AQUI
     }
 
     /**
@@ -108,8 +123,13 @@ class LaboratoryController extends Controller
      */
     public function destroy(Laboratory $laboratory)
     {
+        // VERIFICAÇÃO DE SEGURANÇA - APENAS ADMIN
+        if (Auth::user()->role !== 'admin') {
+            abort(403, 'Apenas administradores podem excluir laboratórios.');
+        }
+
         $laboratory->delete();
 
-        return redirect()->route('laboratories.index')->with('success', 'Laboratório excluído com sucesso!');
+        return redirect()->route('admin.laboratories.index')->with('success', 'Laboratório excluído com sucesso!'); // ← MUDEI A ROTA AQUI
     }
 }

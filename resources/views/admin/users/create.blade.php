@@ -16,7 +16,7 @@
 
                     <div class="col-span-6 sm:col-span-4 mb-4">
                         <x-label for="role" value="{{ __('Tipo de Usuário') }}" />
-                        <select id="role" name="role" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">
+                        <select id="role" name="role" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm" required>
                             <option value="">Selecione a Função</option>
                             <option value="coordenador_curso" {{ old('role') == 'coordenador_curso' ? 'selected' : '' }}>Coordenador de Curso</option>
                             <option value="professor" {{ old('role') == 'professor' ? 'selected' : '' }}>Professor</option>
@@ -48,7 +48,7 @@
 
                     <div class="col-span-6 sm:col-span-4 mb-4">
                         <x-label for="course" value="{{ __('Curso') }}" />
-                        <x-input id="course" type="text" class="mt-1 block w-full" name="course" :value="old('course')" />
+                        <x-input id="course" type="text" class="mt-1 block w-full" name="course" :value="old('course')" required />
                         <p class="mt-1 text-sm text-gray-500">Obrigatório para Coordenador de Curso e Professor.</p>
                     </div>
 
@@ -72,4 +72,31 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // JavaScript para tornar Disciplina e Período obrigatórios apenas para Professores
+        document.addEventListener('DOMContentLoaded', function() {
+            const roleSelect = document.getElementById('role');
+            const disciplineInput = document.getElementById('discipline');
+            const periodInput = document.getElementById('period');
+            
+            function toggleProfessorFields() {
+                const isProfessor = roleSelect.value === 'professor';
+                
+                if (isProfessor) {
+                    disciplineInput.setAttribute('required', 'required');
+                    periodInput.setAttribute('required', 'required');
+                } else {
+                    disciplineInput.removeAttribute('required');
+                    periodInput.removeAttribute('required');
+                }
+            }
+            
+            // Executar na carga inicial
+            toggleProfessorFields();
+            
+            // Executar quando o select mudar
+            roleSelect.addEventListener('change', toggleProfessorFields);
+        });
+    </script>
 </x-app-layout>
